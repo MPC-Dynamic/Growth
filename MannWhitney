@@ -1,0 +1,63 @@
+# If the Shapiro-Wilk test indicates that the satisfaction levels do not follow a normal distribution
+# Reads survey.csv where second column contains categorical variables and first has numerical (satisfaction) scores
+# Generate a bar chart of Categorical column vs. First column
+# Perform an Kruskal-Wallis test to check for differences.
+# The Kruskal-Wallis H test is the non-parametric equivalent of ANOVA
+# Run the Mann-Whitney U tests to find which categories differ.
+
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+from scipy.stats import kruskal, mannwhitneyu
+
+# Load the dataset from 'survey.csv'
+df = pd.read_csv('survey.csv')
+
+# Automatically get the header names for the first two columns
+satisfaction_col = df.columns[0]
+marketing_col = df.columns[1]
+
+# Compute the mean satisfaction for each unique value in the marketing column
+marketing_means = df.groupby(marketing_col)[satisfaction_col].mean()
+
+# Visualization of average satisfaction by the marketing column
+plt.figure(figsize=(12, 6))
+sns.barplot(x=marketing_means.index, y=marketing_means.values, errorbar=None)
+plt.xticks(rotation=45, ha='right')
+plt.title(f"Average {satisfaction_col} by {marketing_col}")
+plt.xlabel(marketing_col)
+plt.ylabel(f"Average {satisfaction_col}")
+
+# Set y-axis limits (using the overall maximum satisfaction value)
+plt.ylim(3, df['HowSat'].max()-0.25)  # scale the differences
+plt.show()
+
+# Kruskal-Wallis test for significant differences across marketing categories
+df_clean = df.dropna(subset=[satisfaction_col, marketing_col])
+groups = [df_clean[df_clean[marketing_col] == category][satisfaction_col] 
+          for category in df_clean[marketing_col].unique() 
+          if len(df_clean[df_clean[marketing_col] == category]) > 1]
+
+if len(groups) > 1:
+    h_stat, p_value = kruskal(*groups)
+    print(f"Kruskal-Wallis test result: H-statistic = {h_stat:.4f}, p-value = {p_value:.4f}")
+else:
+    print("Not enough data for Kruskal-Wallis test.")
+
+# Mann-Whitney U test for pairwise comparisons (if more than 2 groups exist)
+unique_categories = df_clean[marketing_col].unique()
+pairwise_results = []
+
+if len(unique_categories) > 2:
+    for i in range(len(unique_categories)):
+        for j in range(i + 1, len(unique_categories)):
+            group1 = df_clean[df_clean[marketing_col] == unique_categories[i]][satisfaction_col]
+            group2 = df_clean[df_clean[marketing_col] == unique_categories[j]][satisfaction_col]
+            mw_stat, mw_pval = mannwhitneyu(group1, group2, alternative='two-sided')
+            pairwise_results.append((unique_categories[i], unique_categories[j], mw_stat, mw_pval))
+    
+    print("\nMann-Whitney U Test Results:")
+    for result in pairwise_results:
+        print(f"{result[0]} vs {result[1]}: U-statistic = {result[2]:.4f}, p-value = {result[3]:.4f}")
+else:
+    print("\nNot enough groups for Mann-Whitney U test.")
