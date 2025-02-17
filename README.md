@@ -34,7 +34,9 @@ Run "[Forecast Annual Permits](https://github.com/MPC-Dynamic/Growth/blob/main/F
 
 [ANOVA and Tukey HSD tests](https://github.com/MPC-Dynamic/Growth/blob/main/Tukey.py)
 
-[Plots per generation](https://github.com/MPC-Dynamic/Growth/blob/main/Tukey.py](https://github.com/MPC-Dynamic/Growth/blob/main/generations.py)
+[Kruskal-Wallis and Mann-Whitney tests](https://github.com/MPC-Dynamic/Growth/blob/main/Tukey.py)
+
+[Ploting generational differences](https://github.com/MPC-Dynamic/Growth/blob/main/generations.py)
 
 ###
 [OSF DATA](https://osf.io/tgv6q/)
