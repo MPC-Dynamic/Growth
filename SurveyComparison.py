@@ -1,6 +1,8 @@
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
+import seaborn as sns
+import itertools
 from scipy import stats
 
 # -----------------------------
@@ -8,173 +10,171 @@ from scipy import stats
 # -----------------------------
 df = pd.read_csv('generations_wtp.csv')
 
-# Convert key columns to numeric to avoid type errors
-columns_to_convert = [
-    'GenZ2021', 'Millennials2021', 'GenX&YoungestBoomers2021', 
-    'Boomers2021', 'Silents2021', 'Millennials2018', 
-    'Genx2018', 'Boomers2018', 'Silents2018', 
-    'WillingnessPayHigherPOAdues'
+# ----------------------------
+# Define a weighted average function that accepts a generation series and the willingness series.
+# It filters out rows where the generation weight is 0 or missing.
+# ----------------------------
+def weighted_average(w, x):
+    mask = (w != 0) & w.notnull() & x.notnull()
+    if mask.sum() == 0:
+        return np.nan
+    return (w[mask] * x[mask]).sum() / w[mask].sum()
+
+# ----------------------------
+# Define the generation columns for both years.
+# For 2021 we have: GenZ2021, Millennials2021, GenX&YoungestBoomers2021, Boomers2021, Silents2021.
+# For 2018 we have: Millennials2018, Genx2018, Boomers2018, Silents2018.
+# ----------------------------
+generation_columns = [
+    'GenZ2021', 'Millennials2021', 'GenX&YoungestBoomers2021', 'Boomers2021', 'Silents2021',
+    'Millennials2018', 'Genx2018', 'Boomers2018', 'Silents2018'
 ]
-for col in columns_to_convert:
-    df[col] = pd.to_numeric(df[col], errors='coerce')
 
-# -----------------------------
-# Define weighted average and std functions
-# -----------------------------
-def weighted_average(gen_col):
-    """
-    For the given generation column, select only rows where the value is nonzero.
-    Multiply each corresponding WillingnessPayHigherPOAdues value by the generation value,
-    sum these products, and divide by the sum of the generation values.
-    """
-    nonzero = df[gen_col] != 0
-    return (df.loc[nonzero, 'WillingnessPayHigherPOAdues'] * df.loc[nonzero, gen_col]).sum() / df.loc[nonzero, gen_col].sum()
+# ----------------------------
+# Create a helper to map each column name to a display-friendly generation and year.
+# ----------------------------
+def parse_generation(col):
+    if col.endswith('2021'):
+        year = '2021'
+        if col == 'GenZ2021':
+            gen = 'Gen Z'
+        elif col == 'Millennials2021':
+            gen = 'Millennials'
+        elif col == 'GenX&YoungestBoomers2021':
+            gen = 'Gen X'
+        elif col == 'Boomers2021':
+            gen = 'Boomers'
+        elif col == 'Silents2021':
+            gen = 'Silent'
+        else:
+            gen = col
+    elif col.endswith('2018'):
+        year = '2018'
+        if col == 'Millennials2018':
+            gen = 'Millennials'
+        elif col == 'Genx2018':
+            gen = 'Gen X'
+        elif col == 'Boomers2018':
+            gen = 'Boomers'
+        elif col == 'Silents2018':
+            gen = 'Silent'
+        else:
+            gen = col
+    else:
+        year = ''
+        gen = col
+    return gen, year
 
-def weighted_std(gen_col):
-    """
-    Compute the weighted standard deviation for WillingnessPayHigherPOAdues,
-    using the generation value as the weight.
-    """
-    nonzero = df[gen_col] != 0
-    x = df.loc[nonzero, 'WillingnessPayHigherPOAdues']
-    w = df.loc[nonzero, gen_col]
-    avg = weighted_average(gen_col)
-    variance = (w * (x - avg)**2).sum() / w.sum()
-    return np.sqrt(variance)
+# ----------------------------
+# Build a DataFrame for plotting.
+# Each row has: Generation (display name), Year, and the computed Weighted Average.
+# ----------------------------
+plot_data_list = []
+for col in generation_columns:
+    gen, year = parse_generation(col)
+    wa = weighted_average(df[col], df['WillingnessPayHigherPOAdues'])
+    plot_data_list.append({'Generation': gen, 'Year': year, 'Weighted_Average': wa})
+plot_df = pd.DataFrame(plot_data_list)
 
-# -----------------------------
-# Define generation mapping
-# -----------------------------
-# This mapping allows us to refer to the generation names in a consistent order.
-# For Gen Z, only 2021 exists.
-generation_mapping = {
-    'Gen Z':      {'2021': 'GenZ2021',                '2018': None},
-    'Millennials':{'2021': 'Millennials2021',         '2018': 'Millennials2018'},
-    'Gen X':      {'2021': 'GenX&YoungestBoomers2021','2018': 'Genx2018'},
-    'Boomers':    {'2021': 'Boomers2021',             '2018': 'Boomers2018'},
-    'Silent':     {'2021': 'Silents2021',             '2018': 'Silents2018'}
-}
+# We want the generation order to have Gen Z first.
+gen_order = ['Gen Z', 'Millennials', 'Gen X', 'Boomers', 'Silent']
 
-# -----------------------------
-# Compute weighted averages and standard deviations
-# -----------------------------
-weighted_avgs = {'2021': {}, '2018': {}}
-weighted_stds = {'2021': {}, '2018': {}}
+# ----------------------------
+# Choose a color palette.
+# Choices: "deep", "muted", "bright", "pastel", "dark", "colorblind".
+# ----------------------------
+palette = sns.color_palette("bright")
 
-for gen, cols in generation_mapping.items():
-    # For 2021 values (exists for every generation)
-    if cols['2021'] is not None:
-        weighted_avgs['2021'][gen] = weighted_average(cols['2021'])
-        weighted_stds['2021'][gen] = weighted_std(cols['2021'])
-    # For 2018 values (Gen Z is missing)
-    if cols['2018'] is not None:
-        weighted_avgs['2018'][gen] = weighted_average(cols['2018'])
-        weighted_stds['2018'][gen] = weighted_std(cols['2018'])
+# ----------------------------
+# Create the bar plot.
+# Set hue_order so that within each generation the 2018 bar is placed to the left of the 2021 bar.
+# Note: For generations without 2018 data (like Gen Z), only the 2021 bar is shown.
+# ----------------------------
+plt.figure(figsize=(12, 6))
+ax = sns.barplot(
+    data=plot_df,
+    x='Generation',
+    y='Weighted_Average',
+    hue='Year',
+    order=gen_order,
+    hue_order=['2018', '2021'],  # Ensures 2018 bars precede 2021 bars
+    errorbar=None,
+    palette=palette
+)
+plt.title('Weighted Average Willingness to Pay Higher POA Dues by Generation')
+plt.xlabel('Generation')
+plt.ylabel('Average Willingness to Pay')
+plt.ylim(2.0, 3.1)  # 
+plt.xticks(rotation=45)
+plt.grid(True, axis='y', linestyle='--', alpha=0.7)
 
-# -----------------------------
-# Prepare data for plotting
-# -----------------------------
-# We want the following order: Gen Z, Millennials, Gen X, Boomers, Silent.
-plot_df = pd.DataFrame({
-    'Generation': ['Gen Z', 'Millennials', 'Gen X', 'Boomers', 'Silent'],
-    # For 2018, Gen Z will be NaN since no data exists
-    '2018_Value': [
-        weighted_avgs['2018'].get('Gen Z', np.nan),
-        weighted_avgs['2018'].get('Millennials', np.nan),
-        weighted_avgs['2018'].get('Gen X', np.nan),
-        weighted_avgs['2018'].get('Boomers', np.nan),
-        weighted_avgs['2018'].get('Silent', np.nan)
-    ],
-    '2018_Std': [
-        weighted_stds['2018'].get('Gen Z', np.nan),
-        weighted_stds['2018'].get('Millennials', np.nan),
-        weighted_stds['2018'].get('Gen X', np.nan),
-        weighted_stds['2018'].get('Boomers', np.nan),
-        weighted_stds['2018'].get('Silent', np.nan)
-    ],
-    '2021_Value': [
-        weighted_avgs['2021'].get('Gen Z', np.nan),
-        weighted_avgs['2021'].get('Millennials', np.nan),
-        weighted_avgs['2021'].get('Gen X', np.nan),
-        weighted_avgs['2021'].get('Boomers', np.nan),
-        weighted_avgs['2021'].get('Silent', np.nan)
-    ],
-    '2021_Std': [
-        weighted_stds['2021'].get('Gen Z', np.nan),
-        weighted_stds['2021'].get('Millennials', np.nan),
-        weighted_stds['2021'].get('Gen X', np.nan),
-        weighted_stds['2021'].get('Boomers', np.nan),
-        weighted_stds['2021'].get('Silent', np.nan)
-    ]
-})
+# Shift the legend to the left to prevent overlap with the last two columns.
+# Adjust bbox_to_anchor values as needed.
+plt.legend(title="Year", bbox_to_anchor=(0.02, 0.98), loc='upper left', borderaxespad=0)
 
-# -----------------------------
-# Plotting the grouped bar chart
-# -----------------------------
-# In each group the bar for 2018 (if available) is plotted to the left and 2021 to the right.
-generations = plot_df['Generation']
-indices = np.arange(len(generations))
-bar_width = 0.35
-
-fig, ax = plt.subplots(figsize=(12, 6))
-# Plot 2018 bars at left position; note Gen Z will show as NaN (no bar drawn)
-bars_2018 = ax.bar(indices - bar_width/2, plot_df['2018_Value'], bar_width, 
-                   yerr=plot_df['2018_Std'], capsize=5, label='2018', color='lightgreen')
-# Plot 2021 bars at right position
-bars_2021 = ax.bar(indices + bar_width/2, plot_df['2021_Value'], bar_width, 
-                   yerr=plot_df['2021_Std'], capsize=5, label='2021', color='skyblue')
-
-ax.set_xticks(indices)
-ax.set_xticklabels(generations)
-ax.set_xlabel('Generation')
-ax.set_ylabel('Weighted Average Willingness to Pay\n(Excluding Zero Values)')
-ax.set_title('Willingness to Pay Higher POA Dues by Generation\nComparison between 2018 and 2021')
-ax.legend()
-ax.grid(True, axis='y', linestyle='--', alpha=0.7)
 plt.tight_layout()
 plt.show()
 
-# -----------------------------
-# Statistical Analysis: Normality & Pairwise Comparisons
-# -----------------------------
-print("\nStatistical Analysis (Excluding Zero Values):")
-print("-" * 50)
+# ----------------------------
+# Now run the computations: weighted averages, normality tests, and pairwise comparisons.
+# ----------------------------
+alpha = 0.05  # significance level for tests
 
-# For each generation that has both 2018 and 2021 data, compare the raw willingness values.
-# (Gen Z is skipped because 2018 does not exist.)
-for gen, cols in generation_mapping.items():
-    if cols['2018'] is None:
-        print(f"\n{gen}: Only 2021 data available; skipping pairwise comparison.")
+# Dictionaries to store results
+weighted_avgs = {}
+normality_results = {}   # will store the p-value for the Shapiro–Wilk test
+group_willingness_data = {}  # to hold the WillingnessPayHigherPOAdues values for each generation group
+
+print("=== Weighted Averages and Normality Tests ===")
+for col in generation_columns:
+    # Create a mask for rows where the generation value is nonzero and both the generation and willingness data exist.
+    mask = (df[col] != 0) & df[col].notnull() & df['WillingnessPayHigherPOAdues'].notnull()
+    
+    # Get the subset of WillingnessPayHigherPOAdues values
+    group_data = df.loc[mask, 'WillingnessPayHigherPOAdues']
+    group_willingness_data[col] = group_data  # save for later pairwise tests
+    
+    # Compute weighted average for this generation column
+    wa = weighted_average(df[col], df['WillingnessPayHigherPOAdues'])
+    weighted_avgs[col] = wa
+    print(f"Weighted average for {col}: {wa}")
+    
+    # Only run normality test if enough data points exist (Shapiro requires at least 3 values)
+    if len(group_data) >= 3:
+        stat, p = stats.shapiro(group_data)
+        normality_results[col] = p
+        normality_str = "normal" if p > alpha else "not normal"
+        print(f"Normality test for {col}: statistic = {stat:.4f}, p-value = {p:.4f} ({normality_str})")
+    else:
+        normality_results[col] = None
+        print(f"Not enough data for normality test for {col}")
+
+print("\n=== Pairwise Comparisons ===")
+pairwise_results = {}
+# Compare each pair of generation groups using the WillingnessPayHigherPOAdues values
+for col1, col2 in itertools.combinations(generation_columns, 2):
+    # Get the willingness values (dropping any NaNs)
+    group1 = group_willingness_data[col1].dropna()
+    group2 = group_willingness_data[col2].dropna()
+    
+    # Skip pair if one group has too few values
+    if len(group1) < 3 or len(group2) < 3:
+        print(f"Not enough data for pairwise test between {col1} and {col2}")
         continue
     
-    # Extract nonzero data from the raw generation columns
-    col_2021 = cols['2021']
-    col_2018 = cols['2018']
-    data_2021 = df[col_2021][df[col_2021] != 0].dropna()
-    data_2018 = df[col_2018][df[col_2018] != 0].dropna()
+    # Check normality for both groups (if available)
+    normal1 = (normality_results[col1] is not None) and (normality_results[col1] > alpha)
+    normal2 = (normality_results[col2] is not None) and (normality_results[col2] > alpha)
     
-    if len(data_2021) < 3 or len(data_2018) < 3:
-        print(f"\n{gen}: Not enough data for statistical comparison (n2021={len(data_2021)}, n2018={len(data_2018)})")
-        continue
-    
-    # Perform Shapiro–Wilk normality tests
-    stat1, p1 = stats.shapiro(data_2021)
-    stat2, p2 = stats.shapiro(data_2018)
-    normal1 = p1 > 0.05
-    normal2 = p2 > 0.05
-    print(f"\n{gen} - Normality tests:")
-    print(f"2021: Shapiro stat = {stat1:.4f}, p-value = {p1:.4f} ({'normal' if normal1 else 'not normal'})")
-    print(f"2018: Shapiro stat = {stat2:.4f}, p-value = {p2:.4f} ({'normal' if normal2 else 'not normal'})")
-    
-    # Choose the appropriate test based on normality
     if normal1 and normal2:
-        t_stat, p_val = stats.ttest_ind(data_2021, data_2018, equal_var=False)
+        # If both groups are normally distributed, use an independent t-test
+        stat, p = stats.ttest_ind(group1, group2)
         test_used = "t-test"
     else:
-        t_stat, p_val = stats.mannwhitneyu(data_2021, data_2018, alternative='two-sided')
+        # If one (or both) group is not normal, use the Mann–Whitney U test
+        stat, p = stats.mannwhitneyu(group1, group2, alternative='two-sided')
         test_used = "Mann-Whitney U"
     
-    print(f"\n{gen} - {test_used} between 2021 and 2018:")
-    print(f"Statistic: {t_stat:.4f}, p-value: {p_val:.4f}")
-    print(f"Mean 2021 (n={len(data_2021)}): {data_2021.mean():.4f}")
-    print(f"Mean 2018 (n={len(data_2018)}): {data_2018.mean():.4f}")
+    pairwise_results[(col1, col2)] = (test_used, stat, p)
+    significance = "SIGNIFICANT" if p < alpha else "not significant"
+    print(f"{col1} vs {col2}: {test_used}, statistic = {stat:.4f}, p-value = {p:.4f} ({significance})")
